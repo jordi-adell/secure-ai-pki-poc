@@ -5,20 +5,39 @@ SERVER_IMAGE        := pki-poc/server:latest
 CLIENT_IMAGE        := pki-poc/client:latest
 
 GREEN  := \033[0;32m
+RED    := \033[0;31m
 CYAN   := \033[0;36m
 YELLOW := \033[1;33m
 NC     := \033[0m
 
-.PHONY: all demo cluster install-cert-manager deploy-pki \
+.PHONY: all demo check-prereqs cluster install-cert-manager deploy-pki \
         deploy-layer1 validate-layer1 \
         build-images load-images \
         deploy-layer2 validate-layer2 \
         deploy-layer3 validate-layer3 \
         test clean help
 
+## ── Prerequisites check ──────────────────────────────────────────────────────
+
+check-prereqs:
+	@missing=""; \
+	for tool in kind kubectl helm docker openssl; do \
+	  command -v $$tool >/dev/null 2>&1 || missing="$$missing $$tool"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+	  printf "$(RED)✘ Missing required tools:$$missing$(NC)\n"; \
+	  printf "  kind    → go install sigs.k8s.io/kind@latest\n"; \
+	  printf "  kubectl → https://kubernetes.io/docs/tasks/tools/\n"; \
+	  printf "  helm    → brew install helm  /  https://helm.sh/docs/intro/install/\n"; \
+	  printf "  docker  → https://docs.docker.com/get-docker/\n"; \
+	  printf "  openssl → pre-installed on most systems\n"; \
+	  exit 1; \
+	fi
+	@printf "$(GREEN)✔ All prerequisites present$(NC)\n"
+
 ## ── Cluster ──────────────────────────────────────────────────────────────────
 
-cluster:
+cluster: check-prereqs
 	@printf "$(CYAN)▶ Creating kind cluster '$(CLUSTER_NAME)'...$(NC)\n"
 	kind create cluster --name $(CLUSTER_NAME)
 	@printf "$(GREEN)✔ Cluster ready$(NC)\n"
