@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-pass()    { echo -e "${GREEN}✔ $*${NC}"; }
-fail()    { echo -e "${RED}✘ $*${NC}"; exit 1; }
-info()    { echo -e "${CYAN}▶ $*${NC}"; }
-waiting() { echo -e "${YELLOW}⏳ $*${NC}"; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=pki-lib.sh
+source "$SCRIPT_DIR/pki-lib.sh"
 
 NS=pki-layer3
 SERVER_HOST=server.pki-layer3.svc.cluster.local
 SERVER_PORT=8443
 LOCAL_PORT=18444
 MAX_WAIT_MINUTES=45
+RENEW_BEFORE_SECONDS=1800  # 30m
 
-info "Layer 3 — Automatic Certificate Rotation Validation"
-info "Cert duration: 1h, renewBefore: 30m → rotation expected around 30m after issuance"
+banner "Layer 3 — Automatic Certificate Rotation"
+info "Cert duration: 1h, renewBefore: 30m → rotation expected ~30m after issuance"
 
 info "Waiting for Layer 3 deployments to be ready..."
 kubectl wait deployment/server -n "$NS" --for=condition=Available --timeout=120s
 kubectl wait deployment/client -n "$NS" --for=condition=Available --timeout=120s
 pass "Layer 3 deployments ready"
+
+ROOT_PEM=$(cert_pem_from_secret root-ca-tls cert-manager)
+INTER_PEM=$(cert_pem_from_secret intermediate-ca-tls cert-manager)
+SERVER_PEM=$(cert_pem_from_secret server-tls "$NS")
+
+show_chain_banner "$ROOT_PEM" "$INTER_PEM" "$SERVER_PEM" "server.pki-layer3.svc.cluster.local"
 
 TMPDIR=$(mktemp -d)
 PF_PID=""
@@ -49,20 +49,8 @@ start_portforward() {
 
 start_portforward
 
-get_serial() {
-  kubectl get secret server-tls -n "$NS" \
-    -o jsonpath='{.data.tls\.crt}' \
-    | base64 -d \
-    | openssl x509 -noout -serial 2>/dev/null \
-    | sed 's/serial=//'
-}
-
-get_expiry() {
-  kubectl get secret server-tls -n "$NS" \
-    -o jsonpath='{.data.tls\.crt}' \
-    | base64 -d \
-    | openssl x509 -noout -enddate 2>/dev/null \
-    | sed 's/notAfter=//'
+get_server_pem() {
+  kubectl get secret server-tls -n "$NS" -o jsonpath='{.data.tls\.crt}' | base64 -d
 }
 
 check_liveness() {
@@ -78,38 +66,59 @@ check_liveness() {
     | grep -q '"status":"ok"'
 }
 
-SERIAL1=$(get_serial)
-EXPIRY1=$(get_expiry)
-info "Initial serial: $SERIAL1"
-info "Initial expiry: $EXPIRY1"
+expiry_epoch() {
+  local pem=$1
+  local expiry_str
+  expiry_str=$(cert_expiry "$pem")
+  date -d "$expiry_str" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$expiry_str" +%s 2>/dev/null
+}
 
-START_TIME=$(date +%s)
+CURRENT_PEM=$(get_server_pem)
+SERIAL1=$(cert_serial "$CURRENT_PEM")
+EXPIRY1=$(cert_expiry "$CURRENT_PEM")
+EXPIRY1_EPOCH=$(expiry_epoch "$CURRENT_PEM")
+RENEW_EPOCH=$(( EXPIRY1_EPOCH - RENEW_BEFORE_SECONDS ))
+
+info "Initial serial : $SERIAL1"
+info "Initial expiry : $EXPIRY1"
+
+RENEW_TIME=$(date -d "@$RENEW_EPOCH" 2>/dev/null || date -r "$RENEW_EPOCH" 2>/dev/null)
+info "Expected rotation at or after: $RENEW_TIME"
+echo ""
 
 for i in $(seq 1 $MAX_WAIT_MINUTES); do
   sleep 60
-  ELAPSED=$((i))
 
   if check_liveness; then
-    LIVENESS_STATUS="alive"
+    LIVENESS_STATUS="${GREEN}alive${NC}"
   else
-    LIVENESS_STATUS="ERROR"
-    fail "Service became unavailable at ${ELAPSED}m — downtime during rotation!"
+    fail "Service became unavailable at t=${i}m — downtime during rotation!"
   fi
 
-  SERIAL2=$(get_serial)
-  EXPIRY2=$(get_expiry)
-  waiting "t=${ELAPSED}m — service=${LIVENESS_STATUS} serial=${SERIAL2}"
+  CURRENT_PEM=$(get_server_pem)
+  SERIAL2=$(cert_serial "$CURRENT_PEM")
+  EXPIRY2=$(cert_expiry "$CURRENT_PEM")
+
+  NOW_EPOCH=$(date +%s)
+  SECS_TO_RENEW=$(( RENEW_EPOCH - NOW_EPOCH ))
+  if [ "$SECS_TO_RENEW" -gt 0 ]; then
+    COUNTDOWN="(renewal in ${SECS_TO_RENEW}s)"
+  else
+    COUNTDOWN="(renewal window open)"
+  fi
+
+  waiting "t=${i}m — service=$(echo -e $LIVENESS_STATUS) serial=${SERIAL2} ${DIM}${COUNTDOWN}${NC}"
 
   if [ "$SERIAL1" != "$SERIAL2" ]; then
+    show_rotation_event "$i" "$SERIAL1" "$EXPIRY1" "$SERIAL2" "$EXPIRY2"
+    pass "Rotation verified — new cert signed by same CA:"
+    if verify_chain "$ROOT_PEM" "$INTER_PEM" "$CURRENT_PEM"; then
+      pass "Chain verification on rotated cert: root → intermediate → leaf OK"
+    else
+      fail "Chain verification failed on rotated cert"
+    fi
     echo ""
-    pass "Certificate rotation detected at ${ELAPSED}m!"
-    pass "  Old serial : $SERIAL1"
-    pass "  New serial : $SERIAL2"
-    pass "  Old expiry : $EXPIRY1"
-    pass "  New expiry : $EXPIRY2"
-    pass "  Service was available throughout rotation (zero downtime)"
-    echo ""
-    pass "Layer 3 validation complete — automatic rotation confirmed."
+    pass "Layer 3 complete — zero-downtime automatic rotation confirmed."
     exit 0
   fi
 done

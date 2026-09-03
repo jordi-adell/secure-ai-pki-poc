@@ -17,7 +17,7 @@ NC     := \033[0m
         build-images load-images \
         deploy-layer2 validate-layer2 \
         deploy-layer3 validate-layer3 \
-        test clean help
+        status test clean help
 
 ## ── Dependencies ─────────────────────────────────────────────────────────────
 
@@ -126,6 +126,11 @@ validate-layer3:
 	@printf "$(CYAN)▶ Validating Layer 3 (cert rotation — waits up to 45 min)...$(NC)\n"
 	bash scripts/validate-layer3.sh
 
+## ── PKI status ───────────────────────────────────────────────────────────────
+
+status:
+	@bash scripts/pki-status.sh
+
 ## ── Tests ────────────────────────────────────────────────────────────────────
 
 test:
@@ -178,6 +183,7 @@ help:
 	@printf "  validate-layer2       Validate mTLS acceptance and rejection\n"
 	@printf "  deploy-layer3         Deploy rotation demo (1h cert lifetime)\n"
 	@printf "  validate-layer3       Wait for and confirm rotation\n"
+	@printf "  status                Live PKI state — certs, issuers, deployments\n"
 	@printf "  test                  Run Go unit tests\n"
 	@printf "  demo / all            Full end-to-end demo\n"
 	@printf "  clean                 Delete kind cluster\n"
