@@ -1,0 +1,17 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kubernetes-dashboard-tls
+  namespace: kubernetes-dashboard
+spec:
+  secretName: kubernetes-dashboard-certs
+  issuerRef:
+    name: workload-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - localhost
+    - kubernetes-dashboard.kubernetes-dashboard.svc.cluster.local
+  ipAddresses:
+    - 127.0.0.1
+  duration: 24h
+  renewBefore: 1h

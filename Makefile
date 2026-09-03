@@ -17,7 +17,7 @@ NC     := \033[0m
         build-images load-images \
         deploy-layer2 validate-layer2 \
         deploy-layer3 validate-layer3 validate-layer3-ci \
-        dashboard dashboards status k8s-dashboard k8s-dashboard-token test clean help
+        dashboard dashboards status k8s-dashboard k8s-dashboard-token trust-ca test clean help
 
 ## ── Dependencies ─────────────────────────────────────────────────────────────
 
@@ -140,6 +140,12 @@ dashboards:
 	  kubectl wait --for=condition=Available deployment/kubernetes-dashboard \
 	    -n kubernetes-dashboard --timeout=120s; \
 	  kubectl apply -f k8s/dashboard/admin-user.yaml; \
+	  kubectl apply -f k8s/dashboard/certificate.yaml; \
+	  kubectl wait --for=condition=Ready certificate/kubernetes-dashboard-tls \
+	    -n kubernetes-dashboard --timeout=60s; \
+	  kubectl rollout restart deployment/kubernetes-dashboard -n kubernetes-dashboard; \
+	  kubectl wait --for=condition=Available deployment/kubernetes-dashboard \
+	    -n kubernetes-dashboard --timeout=60s; \
 	}
 	@printf "\n$(CYAN)════════════════════════════════════════════════════$(NC)\n"
 	@printf "$(CYAN)  PKI Dashboards$(NC)\n"
@@ -195,17 +201,42 @@ k8s-dashboard:
 	kubectl wait --for=condition=Available deployment/kubernetes-dashboard \
 	  -n kubernetes-dashboard --timeout=120s
 	kubectl apply -f k8s/dashboard/admin-user.yaml
-	@printf "$(GREEN)✔ Kubernetes Dashboard installed$(NC)\n"
+	@printf "$(CYAN)▶ Issuing dashboard TLS cert from PKI CA...$(NC)\n"
+	kubectl apply -f k8s/dashboard/certificate.yaml
+	kubectl wait --for=condition=Ready certificate/kubernetes-dashboard-tls \
+	  -n kubernetes-dashboard --timeout=60s
+	kubectl rollout restart deployment/kubernetes-dashboard -n kubernetes-dashboard
+	kubectl wait --for=condition=Available deployment/kubernetes-dashboard \
+	  -n kubernetes-dashboard --timeout=60s
+	@printf "$(GREEN)✔ Kubernetes Dashboard installed (cert issued by PKI CA)$(NC)\n"
 	@printf "\n$(CYAN)Login token (copy this):$(NC)\n"
 	@kubectl create token admin-user -n kubernetes-dashboard --duration=24h
+	@printf "\n$(YELLOW)Tip: run 'make trust-ca' once to avoid the browser cert warning$(NC)\n"
 	@printf "\n$(CYAN)▶ Starting port-forward → https://localhost:8443$(NC)\n"
-	@printf "$(YELLOW)  Accept the self-signed cert warning in the browser$(NC)\n"
 	@printf "$(YELLOW)  (Ctrl+C to stop)$(NC)\n\n"
 	kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443
 
 k8s-dashboard-token:
 	@printf "$(CYAN)Login token:$(NC)\n"
 	kubectl create token admin-user -n kubernetes-dashboard --duration=24h
+
+trust-ca:
+	@printf "$(CYAN)▶ Exporting Root CA from cluster...$(NC)\n"
+	kubectl get secret root-ca-tls -n cert-manager \
+	  -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/pki-poc-root-ca.pem
+	@printf "$(CYAN)▶ Adding Root CA to system trust store...$(NC)\n"
+	@if [ "$$(uname)" = "Darwin" ]; then \
+	  security add-trusted-cert -d -r trustRoot \
+	    -k "$$HOME/Library/Keychains/login.keychain-db" /tmp/pki-poc-root-ca.pem; \
+	else \
+	  mkdir -p "$$HOME/.pki/nssdb"; \
+	  certutil -d sql:"$$HOME/.pki/nssdb" -A -t "CT,," \
+	    -n "PKI PoC Root CA" -i /tmp/pki-poc-root-ca.pem 2>/dev/null || \
+	  certutil -d "$$HOME/.pki/nssdb" -A -t "CT,," \
+	    -n "PKI PoC Root CA" -i /tmp/pki-poc-root-ca.pem; \
+	fi
+	@rm -f /tmp/pki-poc-root-ca.pem
+	@printf "$(GREEN)✔ Root CA trusted — restart Chrome for changes to take effect$(NC)\n"
 
 ## ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -264,6 +295,7 @@ help:
 	@printf "  status                Live PKI state — certs, issuers, deployments\n"
 	@printf "  k8s-dashboard         Install Kubernetes Dashboard + open port-forward\n"
 	@printf "  k8s-dashboard-token   Print a fresh login token for the dashboard\n"
+	@printf "  trust-ca              Add PKI Root CA to system trust store (removes Chrome warning)\n"
 	@printf "  test                  Run Go unit tests\n"
 	@printf "  demo / all            Full end-to-end demo (includes rotation wait)\n"
 	@printf "  demo-ci               CI demo — layers 1-3, no rotation wait\n"
