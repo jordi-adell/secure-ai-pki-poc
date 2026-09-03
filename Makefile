@@ -17,7 +17,7 @@ NC     := \033[0m
         build-images load-images \
         deploy-layer2 validate-layer2 \
         deploy-layer3 validate-layer3 validate-layer3-ci \
-        dashboard dashboards status k8s-dashboard k8s-dashboard-token trust-ca test clean help
+        dashboard dashboards status test clean help
 
 ## ── Dependencies ─────────────────────────────────────────────────────────────
 
@@ -147,6 +147,20 @@ dashboards:
 	  kubectl wait --for=condition=Available deployment/kubernetes-dashboard \
 	    -n kubernetes-dashboard --timeout=60s; \
 	}
+	@printf "$(CYAN)▶ Trusting Root CA in system store...$(NC)\n"
+	@kubectl get secret root-ca-tls -n cert-manager \
+	  -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/pki-poc-root-ca.pem
+	@if [ "$$(uname)" = "Darwin" ]; then \
+	  security add-trusted-cert -d -r trustRoot \
+	    -k "$$HOME/Library/Keychains/login.keychain-db" /tmp/pki-poc-root-ca.pem 2>/dev/null || true; \
+	else \
+	  mkdir -p "$$HOME/.pki/nssdb"; \
+	  certutil -d sql:"$$HOME/.pki/nssdb" -A -t "CT,," \
+	    -n "PKI PoC Root CA" -i /tmp/pki-poc-root-ca.pem 2>/dev/null || \
+	  certutil -d "$$HOME/.pki/nssdb" -A -t "CT,," \
+	    -n "PKI PoC Root CA" -i /tmp/pki-poc-root-ca.pem 2>/dev/null || true; \
+	fi
+	@rm -f /tmp/pki-poc-root-ca.pem
 	@printf "\n$(CYAN)════════════════════════════════════════════════════$(NC)\n"
 	@printf "$(CYAN)  PKI Dashboards$(NC)\n"
 	@printf "$(CYAN)════════════════════════════════════════════════════$(NC)\n"
@@ -154,7 +168,8 @@ dashboards:
 	@printf "  K8s Dashboard   → $(GREEN)https://localhost:8443$(NC)\n"
 	@printf "\n$(CYAN)K8s Dashboard login token:$(NC)\n"
 	@kubectl create token admin-user -n kubernetes-dashboard --duration=24h
-	@printf "\n$(YELLOW)Ctrl+C to stop both$(NC)\n\n"
+	@printf "\n$(YELLOW)Restart Chrome if this is the first run (Root CA was just trusted)$(NC)\n"
+	@printf "$(YELLOW)Ctrl+C to stop both dashboards$(NC)\n\n"
 	@trap 'kill %1 %2 2>/dev/null; exit 0' INT TERM; \
 	  go run ./cmd/dashboard & \
 	  kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443 & \
@@ -192,51 +207,6 @@ demo-ci: cluster install-cert-manager
 	@printf "\n$(GREEN)════════════════════════════════════════════════════$(NC)\n"
 	@printf "$(GREEN)  CI demo complete.$(NC)\n"
 	@printf "$(GREEN)════════════════════════════════════════════════════$(NC)\n\n"
-
-## ── Kubernetes Dashboard ─────────────────────────────────────────────────────
-
-k8s-dashboard:
-	@printf "$(CYAN)▶ Installing Kubernetes Dashboard...$(NC)\n"
-	kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-	kubectl wait --for=condition=Available deployment/kubernetes-dashboard \
-	  -n kubernetes-dashboard --timeout=120s
-	kubectl apply -f k8s/dashboard/admin-user.yaml
-	@printf "$(CYAN)▶ Issuing dashboard TLS cert from PKI CA...$(NC)\n"
-	kubectl apply -f k8s/dashboard/certificate.yaml
-	kubectl wait --for=condition=Ready certificate/kubernetes-dashboard-tls \
-	  -n kubernetes-dashboard --timeout=60s
-	kubectl rollout restart deployment/kubernetes-dashboard -n kubernetes-dashboard
-	kubectl wait --for=condition=Available deployment/kubernetes-dashboard \
-	  -n kubernetes-dashboard --timeout=60s
-	@printf "$(GREEN)✔ Kubernetes Dashboard installed (cert issued by PKI CA)$(NC)\n"
-	@printf "\n$(CYAN)Login token (copy this):$(NC)\n"
-	@kubectl create token admin-user -n kubernetes-dashboard --duration=24h
-	@printf "\n$(YELLOW)Tip: run 'make trust-ca' once to avoid the browser cert warning$(NC)\n"
-	@printf "\n$(CYAN)▶ Starting port-forward → https://localhost:8443$(NC)\n"
-	@printf "$(YELLOW)  (Ctrl+C to stop)$(NC)\n\n"
-	kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443
-
-k8s-dashboard-token:
-	@printf "$(CYAN)Login token:$(NC)\n"
-	kubectl create token admin-user -n kubernetes-dashboard --duration=24h
-
-trust-ca:
-	@printf "$(CYAN)▶ Exporting Root CA from cluster...$(NC)\n"
-	kubectl get secret root-ca-tls -n cert-manager \
-	  -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/pki-poc-root-ca.pem
-	@printf "$(CYAN)▶ Adding Root CA to system trust store...$(NC)\n"
-	@if [ "$$(uname)" = "Darwin" ]; then \
-	  security add-trusted-cert -d -r trustRoot \
-	    -k "$$HOME/Library/Keychains/login.keychain-db" /tmp/pki-poc-root-ca.pem; \
-	else \
-	  mkdir -p "$$HOME/.pki/nssdb"; \
-	  certutil -d sql:"$$HOME/.pki/nssdb" -A -t "CT,," \
-	    -n "PKI PoC Root CA" -i /tmp/pki-poc-root-ca.pem 2>/dev/null || \
-	  certutil -d "$$HOME/.pki/nssdb" -A -t "CT,," \
-	    -n "PKI PoC Root CA" -i /tmp/pki-poc-root-ca.pem; \
-	fi
-	@rm -f /tmp/pki-poc-root-ca.pem
-	@printf "$(GREEN)✔ Root CA trusted — restart Chrome for changes to take effect$(NC)\n"
 
 ## ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -290,12 +260,9 @@ help:
 	@printf "  validate-layer2       Validate mTLS acceptance and rejection\n"
 	@printf "  deploy-layer3         Deploy rotation demo (1h cert lifetime)\n"
 	@printf "  validate-layer3       Wait for and confirm rotation\n"
-	@printf "  dashboards            Start PKI + K8s dashboards together (Ctrl+C stops both)\n"
-	@printf "  dashboard             PKI dashboard only (http://localhost:8080)\n"
+	@printf "  dashboards            Start PKI + K8s dashboards (installs, trusts CA, Ctrl+C stops both)\n"
+	@printf "  dashboard             PKI dashboard only (https://localhost:8080)\n"
 	@printf "  status                Live PKI state — certs, issuers, deployments\n"
-	@printf "  k8s-dashboard         Install Kubernetes Dashboard + open port-forward\n"
-	@printf "  k8s-dashboard-token   Print a fresh login token for the dashboard\n"
-	@printf "  trust-ca              Add PKI Root CA to system trust store (removes Chrome warning)\n"
 	@printf "  test                  Run Go unit tests\n"
 	@printf "  demo / all            Full end-to-end demo (includes rotation wait)\n"
 	@printf "  demo-ci               CI demo — layers 1-3, no rotation wait\n"
