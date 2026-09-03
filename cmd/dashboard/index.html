@@ -177,6 +177,13 @@
 <script>
 const $ = id => document.getElementById(id);
 
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escAttr(s) {
+  return escHtml(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 // ── Status polling ────────────────────────────────────────────────────────────
 
 let knownSerials = {};
@@ -238,11 +245,11 @@ function treeNode(cls, prefix, name, ns, cert, showNs) {
   const badge = cert.ready
     ? '<span class="badge ok">✓ Ready</span>'
     : '<span class="badge err">✗ Not Ready</span>';
-  const nsTag = showNs ? `<span class="node-ns">${ns}</span>` : '';
+  const nsTag = showNs ? `<span class="node-ns">${escHtml(ns)}</span>` : '';
   const exp = cert.expiry ? `<span class="node-meta">${expiryLabel(cert.expiry)}</span>` : '';
   return `<div class="tree-node ${cls}">
     <span class="node-icon">${prefix}</span>
-    <span class="node-name">${name}</span>
+    <span class="node-name">${escHtml(name)}</span>
     ${nsTag} ${badge} ${exp}
   </div>`;
 }
@@ -264,17 +271,19 @@ function renderCertsTable(certs) {
       ? '<span class="badge ok">✓ Ready</span>'
       : '<span class="badge err">✗ Not Ready</span>';
     const serial = c.serial
-      ? `<span class="serial" title="${c.serial}">${c.serial.slice(0,16)}…</span>`
+      ? `<span class="serial" title="${escAttr(c.serial)}">${escHtml(c.serial.slice(0,16))}…</span>`
       : '<span style="color:var(--dim)">—</span>';
-    const subject = c.subject || c.name;
-    const sans = c.sans && c.sans.length ? `<div style="color:var(--dim);font-size:11px;font-family:var(--mono)">${c.sans.slice(0,2).join(', ')}</div>` : '';
+    const subject = escHtml(c.subject || c.name);
+    const sans = c.sans && c.sans.length
+      ? `<div style="color:var(--dim);font-size:11px;font-family:var(--mono)">${c.sans.slice(0,2).map(escHtml).join(', ')}</div>`
+      : '';
     const expDate = c.expiry ? new Date(c.expiry) : null;
     const soon = expDate && (expDate - Date.now()) < 2*3600*1000;
     const exp = expDate ? `<span class="expiry ${soon?'soon':''}">${expDate.toISOString().slice(0,10)}</span>` : '—';
     return `<tr>
-      <td class="mono" style="color:var(--dim);font-size:12px">${c.namespace}</td>
-      <td class="mono" style="font-weight:600">${c.name}</td>
-      <td class="mono" style="color:var(--dim);font-size:12px">${c.issuer || '—'}</td>
+      <td class="mono" style="color:var(--dim);font-size:12px">${escHtml(c.namespace)}</td>
+      <td class="mono" style="font-weight:600">${escHtml(c.name)}</td>
+      <td class="mono" style="color:var(--dim);font-size:12px">${escHtml(c.issuer || '—')}</td>
       <td><div style="font-size:12px">${subject}</div>${sans}</td>
       <td>${serial}</td>
       <td>${exp}</td>
@@ -299,13 +308,13 @@ function renderDeploys(deploys) {
     .sort(([a],[b]) => a.localeCompare(b))
     .map(([ns, ds]) => `
       <div class="deploy-group">
-        <div class="deploy-ns">${ns}</div>
+        <div class="deploy-ns">${escHtml(ns)}</div>
         ${ds.map(d => {
           const ok = d.ready > 0 && d.ready === d.total;
           const dotCls = ok ? 'green' : d.ready > 0 ? 'yellow' : 'red';
           return `<div class="deploy-row">
             <span class="dot ${dotCls}"></span>
-            <span class="deploy-name">${d.name}</span>
+            <span class="deploy-name">${escHtml(d.name)}</span>
             <span class="deploy-count">${d.ready || 0}/${d.total || 0}</span>
           </div>`;
         }).join('')}
@@ -327,8 +336,8 @@ function renderRotations(rotations) {
     const newExp = r.new_expiry ? new Date(r.new_expiry).toISOString().slice(0,10) : '?';
     return `<div class="rotation-event">
       <div class="rot-time">${t}</div>
-      <div class="rot-cert">🔄 ${r.namespace} / ${r.cert_name}</div>
-      <div class="rot-serial">${oldS} <span class="rot-arrow">→</span> ${newS}</div>
+      <div class="rot-cert">🔄 ${escHtml(r.namespace)} / ${escHtml(r.cert_name)}</div>
+      <div class="rot-serial">${escHtml(oldS)} <span class="rot-arrow">→</span> ${escHtml(newS)}</div>
       <div class="rot-serial" style="color:var(--green)">exp: ${oldExp} → ${newExp}</div>
     </div>`;
   }).join('');
@@ -366,10 +375,6 @@ function connectLogs() {
     if (evtSrc.readyState === EventSource.CLOSED) return;
     setTimeout(connectLogs, 3000);
   };
-}
-
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 $('log-ns').addEventListener('change', connectLogs);
