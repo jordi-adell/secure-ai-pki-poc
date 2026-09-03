@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PKI Infrastructure Report — {{.GeneratedAt}}</title>
+<style>
+  :root { --green:#16a34a; --red:#dc2626; --yellow:#ca8a04; --blue:#2563eb; --gray:#6b7280; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:14px; color:#111; background:#fff; padding:40px; max-width:1100px; margin:0 auto; }
+  @media print { body{padding:0} .no-print{display:none} }
+
+  h1 { font-size:22px; font-weight:700; color:#111; }
+  h2 { font-size:14px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.06em; margin:32px 0 12px; padding-bottom:6px; border-bottom:2px solid #e5e7eb; }
+  h3 { font-size:13px; font-weight:600; color:#374151; margin:16px 0 6px; }
+
+  header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:32px; padding-bottom:24px; border-bottom:2px solid #111; }
+  .report-meta { text-align:right; font-size:12px; color:var(--gray); line-height:1.8; }
+  .report-meta strong { display:block; font-size:13px; color:#111; }
+
+  /* Summary cards */
+  .summary { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:8px; }
+  .metric { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:14px 16px; }
+  .metric-val { font-size:28px; font-weight:700; line-height:1; }
+  .metric-val.ok    { color:var(--green); }
+  .metric-val.warn  { color:var(--yellow); }
+  .metric-val.err   { color:var(--red); }
+  .metric-label { font-size:11px; color:var(--gray); margin-top:4px; text-transform:uppercase; letter-spacing:.05em; }
+
+  /* PKI tree */
+  .tree { font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:16px 20px; }
+  .tree-row { padding:3px 0; display:flex; align-items:baseline; gap:10px; }
+  .tree-row.root  { color:var(--green);  font-weight:700; }
+  .tree-row.inter { color:var(--blue);   font-weight:700; padding-left:22px; }
+  .tree-row.leaf  { padding-left:46px; }
+  .tree-meta { color:var(--gray); font-size:11px; margin-left:auto; }
+
+  /* Tables */
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:8px; }
+  th { text-align:left; padding:6px 10px; background:#f3f4f6; border:1px solid #e5e7eb; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--gray); }
+  td { padding:8px 10px; border:1px solid #e5e7eb; vertical-align:top; }
+  tr:nth-child(even) td { background:#fafafa; }
+  .mono { font-family:'SFMono-Regular',Consolas,monospace; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:12px; font-size:11px; font-weight:600; }
+  .badge.ok  { background:#dcfce7; color:var(--green); }
+  .badge.err { background:#fee2e2; color:var(--red); }
+  .serial { font-size:11px; color:var(--gray); word-break:break-all; }
+  .sans   { font-size:11px; color:var(--gray); }
+
+  /* Rotation events */
+  .rotation-event { border:1px solid #e5e7eb; border-radius:6px; padding:12px 16px; margin-bottom:8px; background:#fffbeb; }
+  .rotation-event .rot-time  { font-size:11px; color:var(--gray); margin-bottom:4px; }
+  .rotation-event .rot-cert  { font-family:monospace; font-weight:600; color:#92400e; }
+  .rotation-event .rot-arrow { color:var(--green); font-weight:700; }
+  .rotation-event .rot-det   { font-size:11px; color:var(--gray); font-family:monospace; margin-top:4px; }
+  .none { color:var(--gray); font-style:italic; padding:8px 0; }
+
+  footer { margin-top:40px; padding-top:16px; border-top:1px solid #e5e7eb; font-size:11px; color:var(--gray); display:flex; justify-content:space-between; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div style="font-size:11px;color:var(--gray);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em">PKI Infrastructure</div>
+    <h1>🔐 Certificate Report</h1>
+  </div>
+  <div class="report-meta">
+    <strong>Generated</strong>
+    {{.GeneratedAt}}<br>
+    Kind cluster · cert-manager {{.CertManagerVersion}}
+  </div>
+</header>
+
+<!-- Summary -->
+<h2>Summary</h2>
+<div class="summary">
+  <div class="metric">
+    <div class="metric-val {{if eq .TotalCerts .ReadyCerts}}ok{{else}}err{{end}}">{{.ReadyCerts}}/{{.TotalCerts}}</div>
+    <div class="metric-label">Certificates Ready</div>
+  </div>
+  <div class="metric">
+    <div class="metric-val {{if eq .TotalDeploys .ReadyDeploys}}ok{{else}}warn{{end}}">{{.ReadyDeploys}}/{{.TotalDeploys}}</div>
+    <div class="metric-label">Services Healthy</div>
+  </div>
+  <div class="metric">
+    <div class="metric-val {{if .Status.Rotations}}ok{{else}}{{end}}">{{len .Status.Rotations}}</div>
+    <div class="metric-label">Rotations Detected</div>
+  </div>
+  <div class="metric">
+    <div class="metric-val">{{.Layers}}</div>
+    <div class="metric-label">PKI Layers Active</div>
+  </div>
+</div>
+
+<!-- PKI Tree -->
+<h2>PKI Trust Chain</h2>
+<div class="tree">
+{{range .Tree}}
+  <div class="tree-row {{.Class}}">
+    <span>{{.Prefix}}</span>
+    <span>{{.Name}}</span>
+    {{if .Namespace}}<span style="font-size:11px;color:var(--gray);background:#e5e7eb;padding:0 5px;border-radius:3px">{{.Namespace}}</span>{{end}}
+    {{if .Ready}}<span style="color:var(--green)">✓</span>{{else}}<span style="color:var(--red)">✗</span>{{end}}
+    <span class="tree-meta">{{.Expiry}}</span>
+  </div>
+{{end}}
+</div>
+
+<!-- Certificates -->
+<h2>Certificate Inventory</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Namespace</th>
+      <th>Name</th>
+      <th>Issuer</th>
+      <th>Subject</th>
+      <th>SANs</th>
+      <th>Serial</th>
+      <th>Valid Until (UTC)</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .Status.Certs}}
+    <tr>
+      <td class="mono" style="font-size:12px">{{.Namespace}}</td>
+      <td class="mono" style="font-weight:600">{{.Name}}</td>
+      <td class="mono" style="font-size:12px">{{.Issuer}}</td>
+      <td style="font-size:12px">{{.Subject}}</td>
+      <td class="sans">{{range .SANs}}{{.}}<br>{{end}}</td>
+      <td class="serial">{{.Serial}}</td>
+      <td class="mono" style="font-size:12px;white-space:nowrap">{{.Expiry | formatExpiry}}</td>
+      <td>{{if .Ready}}<span class="badge ok">✓ Ready</span>{{else}}<span class="badge err">✗ Not Ready</span>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+
+<!-- Services -->
+<h2>Service Health</h2>
+{{if .Status.Deployments}}
+<table>
+  <thead>
+    <tr><th>Namespace</th><th>Deployment</th><th>Ready</th><th>Total</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+  {{range .Status.Deployments}}
+    <tr>
+      <td class="mono" style="font-size:12px">{{.Namespace}}</td>
+      <td class="mono" style="font-weight:600">{{.Name}}</td>
+      <td>{{.Ready}}</td>
+      <td>{{.Total}}</td>
+      <td>{{if eq .Ready .Total}}<span class="badge ok">Healthy</span>{{else}}<span class="badge err">Degraded</span>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="none">No deployments found.</p>
+{{end}}
+
+<!-- Rotation History -->
+<h2>Rotation History</h2>
+{{if .Status.Rotations}}
+{{range .Status.Rotations}}
+<div class="rotation-event">
+  <div class="rot-time">{{.DetectedAt | formatTime}}</div>
+  <div class="rot-cert">{{.Namespace}} / {{.CertName}}</div>
+  <div class="rot-det">
+    Serial: {{.OldSerial}} <span class="rot-arrow">→</span> {{.NewSerial}}<br>
+    Expiry: {{.OldExpiry | formatExpiry}} <span class="rot-arrow">→</span> {{.NewExpiry | formatExpiry}}
+  </div>
+</div>
+{{end}}
+{{else}}
+<p class="none">No rotation events recorded in this session.</p>
+{{end}}
+
+<footer>
+  <span>PKI PoC — secure-ai-pki-poc</span>
+  <span>cert-manager · kind · Go crypto/tls</span>
+</footer>
+
+</body>
+</html>

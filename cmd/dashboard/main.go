@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,25 @@ import (
 
 //go:embed index.html
 var indexHTML string
+
+//go:embed report.html
+var reportTmplSrc string
+
+var reportTmpl = template.Must(template.New("report").Funcs(template.FuncMap{
+	"formatTime": func(t time.Time) string {
+		return t.UTC().Format("2006-01-02 15:04:05 UTC")
+	},
+	"formatExpiry": func(s string) string {
+		if s == "" {
+			return "—"
+		}
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return s
+		}
+		return t.UTC().Format("2006-01-02 15:04:05 UTC")
+	},
+}).Parse(reportTmplSrc))
 
 const defaultAddr = ":8080"
 
@@ -253,6 +274,127 @@ func poll() {
 	}
 }
 
+type treeRow struct {
+	Class     string
+	Prefix    string
+	Name      string
+	Namespace string
+	Ready     bool
+	Expiry    string
+}
+
+type reportData struct {
+	GeneratedAt        string
+	CertManagerVersion string
+	TotalCerts         int
+	ReadyCerts         int
+	TotalDeploys       int
+	ReadyDeploys       int
+	Layers             int
+	Tree               []treeRow
+	Status             Status
+}
+
+func buildTree(certs []CertInfo) []treeRow {
+	var rows []treeRow
+	root := findCert(certs, "cert-manager", "root-ca")
+	inter := findCert(certs, "cert-manager", "intermediate-ca")
+
+	if root != nil {
+		rows = append(rows, treeRow{"root", "◆", root.Name, "", root.Ready, fmtExpiry(root.Expiry)})
+	}
+	if inter != nil {
+		rows = append(rows, treeRow{"inter", "└─◆", inter.Name, "", inter.Ready, fmtExpiry(inter.Expiry)})
+	}
+
+	var leaves []CertInfo
+	for _, c := range certs {
+		if c.Namespace != "cert-manager" {
+			leaves = append(leaves, c)
+		}
+	}
+	sort.Slice(leaves, func(i, j int) bool {
+		if leaves[i].Namespace != leaves[j].Namespace {
+			return leaves[i].Namespace < leaves[j].Namespace
+		}
+		return leaves[i].Name < leaves[j].Name
+	})
+	for i, c := range leaves {
+		prefix := "├─◆"
+		if i == len(leaves)-1 {
+			prefix = "└─◆"
+		}
+		rows = append(rows, treeRow{"leaf", prefix, c.Name, c.Namespace, c.Ready, fmtExpiry(c.Expiry)})
+	}
+	return rows
+}
+
+func findCert(certs []CertInfo, ns, name string) *CertInfo {
+	for i := range certs {
+		if certs[i].Namespace == ns && certs[i].Name == name {
+			return &certs[i]
+		}
+	}
+	return nil
+}
+
+func fmtExpiry(s string) string {
+	if s == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return s
+	}
+	return t.UTC().Format("2006-01-02")
+}
+
+func activeLayers(certs []CertInfo) int {
+	ns := map[string]bool{}
+	for _, c := range certs {
+		if c.Namespace != "cert-manager" {
+			ns[c.Namespace] = true
+		}
+	}
+	return len(ns)
+}
+
+func handleReport(w http.ResponseWriter, _ *http.Request) {
+	mu.RLock()
+	s := current
+	mu.RUnlock()
+
+	readyCerts := 0
+	for _, c := range s.Certs {
+		if c.Ready {
+			readyCerts++
+		}
+	}
+	readyDeploys := 0
+	for _, d := range s.Deployments {
+		if d.Ready == d.Total && d.Total > 0 {
+			readyDeploys++
+		}
+	}
+
+	data := reportData{
+		GeneratedAt:        time.Now().UTC().Format("2006-01-02 15:04:05 UTC"),
+		CertManagerVersion: "v1.16.2",
+		TotalCerts:         len(s.Certs),
+		ReadyCerts:         readyCerts,
+		TotalDeploys:       len(s.Deployments),
+		ReadyDeploys:       readyDeploys,
+		Layers:             activeLayers(s.Certs),
+		Tree:               buildTree(s.Certs),
+		Status:             s,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := reportTmpl.Execute(w, data); err != nil {
+		log.Printf("report template: %v", err)
+	}
+}
+
 func handleStatus(w http.ResponseWriter, _ *http.Request) {
 	mu.RLock()
 	s := current
@@ -314,6 +456,7 @@ func main() {
 	}
 	go poll()
 	http.HandleFunc("/", handleIndex)
+	http.HandleFunc("/report", handleReport)
 	http.HandleFunc("/api/status", handleStatus)
 	http.HandleFunc("/api/logs", handleLogs)
 	log.Printf("PKI Dashboard → http://localhost%s", addr)
