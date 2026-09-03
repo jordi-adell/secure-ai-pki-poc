@@ -13,7 +13,9 @@ info()    { echo -e "${CYAN}▶ $*${NC}"; }
 waiting() { echo -e "${YELLOW}⏳ $*${NC}"; }
 
 NS=pki-layer3
-SERVER_URL=https://server.pki-layer3.svc.cluster.local:8443
+SERVER_HOST=server.pki-layer3.svc.cluster.local
+SERVER_PORT=8443
+LOCAL_PORT=18444
 MAX_WAIT_MINUTES=45
 
 info "Layer 3 — Automatic Certificate Rotation Validation"
@@ -23,6 +25,29 @@ info "Waiting for Layer 3 deployments to be ready..."
 kubectl wait deployment/server -n "$NS" --for=condition=Available --timeout=120s
 kubectl wait deployment/client -n "$NS" --for=condition=Available --timeout=120s
 pass "Layer 3 deployments ready"
+
+TMPDIR=$(mktemp -d)
+PF_PID=""
+
+cleanup() {
+  [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null
+  rm -rf "$TMPDIR"
+}
+trap cleanup EXIT
+
+info "Extracting TLS certificates from Secrets..."
+kubectl get secret client-tls -n "$NS" -o jsonpath='{.data.tls\.crt}' | base64 -d > "$TMPDIR/client.crt"
+kubectl get secret client-tls -n "$NS" -o jsonpath='{.data.tls\.key}' | base64 -d > "$TMPDIR/client.key"
+kubectl get secret client-tls -n "$NS" -o jsonpath='{.data.ca\.crt}'  | base64 -d > "$TMPDIR/ca.crt"
+
+start_portforward() {
+  [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null
+  kubectl port-forward svc/server "$LOCAL_PORT:$SERVER_PORT" -n "$NS" >/dev/null 2>&1 &
+  PF_PID=$!
+  sleep 2
+}
+
+start_portforward
 
 get_serial() {
   kubectl get secret server-tls -n "$NS" \
@@ -41,13 +66,16 @@ get_expiry() {
 }
 
 check_liveness() {
-  CLIENT_POD=$(kubectl get pod -n "$NS" -l app=client -o jsonpath='{.items[0].metadata.name}')
-  kubectl exec -n "$NS" "$CLIENT_POD" -- \
-    wget -qO- \
-    --certificate=/certs/tls.crt \
-    --private-key=/certs/tls.key \
-    --ca-certificate=/certs/ca.crt \
-    "$SERVER_URL" 2>&1 | grep -q '"status":"ok"'
+  if ! kill -0 "$PF_PID" 2>/dev/null; then
+    start_portforward
+  fi
+  curl -sf --max-time 5 \
+    --resolve "${SERVER_HOST}:${LOCAL_PORT}:127.0.0.1" \
+    --cacert "$TMPDIR/ca.crt" \
+    --cert   "$TMPDIR/client.crt" \
+    --key    "$TMPDIR/client.key" \
+    "https://${SERVER_HOST}:${LOCAL_PORT}/" 2>/dev/null \
+    | grep -q '"status":"ok"'
 }
 
 SERIAL1=$(get_serial)
