@@ -63,7 +63,7 @@ fi
 
 info "Checking client pod logs for successful mTLS polls..."
 LOGS=$(kubectl logs -n "$NS" deployment/client --tail=20 2>/dev/null || true)
-if echo "$LOGS" | grep -q '"status":"ok"'; then
+if echo "$LOGS" | grep -q 'status=ok'; then
   pass "Client logs confirm mTLS polls are succeeding"
 else
   info "Client log output:"
