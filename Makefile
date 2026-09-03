@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := help
+
 CLUSTER_NAME        := pki-poc
 KIND_CONTEXT        := kind-$(CLUSTER_NAME)
 CERT_MANAGER_VERSION := v1.16.2
