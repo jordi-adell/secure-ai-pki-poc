@@ -169,16 +169,17 @@ demo-ci: cluster install-cert-manager
 
 k8s-dashboard:
 	@printf "$(CYAN)▶ Installing Kubernetes Dashboard...$(NC)\n"
-	helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/ --force-update
-	helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard \
-	  --namespace kubernetes-dashboard --create-namespace --wait
+	kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+	kubectl wait --for=condition=Available deployment/kubernetes-dashboard \
+	  -n kubernetes-dashboard --timeout=120s
 	kubectl apply -f k8s/dashboard/admin-user.yaml
 	@printf "$(GREEN)✔ Kubernetes Dashboard installed$(NC)\n"
 	@printf "\n$(CYAN)Login token (copy this):$(NC)\n"
 	@kubectl create token admin-user -n kubernetes-dashboard --duration=24h
 	@printf "\n$(CYAN)▶ Starting port-forward → https://localhost:8443$(NC)\n"
+	@printf "$(YELLOW)  Accept the self-signed cert warning in the browser$(NC)\n"
 	@printf "$(YELLOW)  (Ctrl+C to stop)$(NC)\n\n"
-	kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard-kong-proxy 8443:443
+	kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443
 
 k8s-dashboard-token:
 	@printf "$(CYAN)Login token:$(NC)\n"
