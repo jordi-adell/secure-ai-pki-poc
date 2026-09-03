@@ -2,6 +2,7 @@
 # Binaries produced by 'go build ./cmd/...' in the repo root
 /server
 /client
+/dashboard
 # Conventional output directory (e.g. 'go build -o bin/...')
 bin/
 # Windows executables
