@@ -22,38 +22,38 @@ cert_pem_from_secret() {
 
 cert_field() {
   local pem=$1 flag=$2
-  echo "$pem" | openssl x509 -noout "$flag" 2>/dev/null
+  echo "$pem" | openssl x509 -noout "$flag" 2>/dev/null || true
 }
 
 cert_cn() {
   local pem=$1
-  cert_field "$pem" -subject | sed 's/.*CN\s*=\s*//' | sed 's/,.*//'
+  cert_field "$pem" -subject | sed 's/.*CN\s*=\s*//' | sed 's/,.*//' || true
 }
 
 cert_serial() {
   local pem=$1
-  cert_field "$pem" -serial | sed 's/serial=//'
+  cert_field "$pem" -serial | sed 's/serial=//' || true
 }
 
 cert_expiry() {
   local pem=$1
-  cert_field "$pem" -enddate | sed 's/notAfter=//'
+  cert_field "$pem" -enddate | sed 's/notAfter=//' || true
 }
 
 cert_start() {
   local pem=$1
-  cert_field "$pem" -startdate | sed 's/notBefore=//'
+  cert_field "$pem" -startdate | sed 's/notBefore=//' || true
 }
 
 cert_issuer_cn() {
   local pem=$1
-  cert_field "$pem" -issuer | sed 's/.*CN\s*=\s*//' | sed 's/,.*//'
+  cert_field "$pem" -issuer | sed 's/.*CN\s*=\s*//' | sed 's/,.*//' || true
 }
 
 cert_sans() {
   local pem=$1
-  cert_field "$pem" -ext subjectAltName 2>/dev/null \
-    | grep -oE 'DNS:[^,]+|IP:[^,]+' | tr '\n' ' '
+  cert_field "$pem" -ext subjectAltName \
+    | grep -oE 'DNS:[^,]+|IP:[^,]+' | tr '\n' ' ' || true
 }
 
 print_cert_block() {
@@ -94,12 +94,14 @@ show_chain_banner() {
 verify_chain() {
   local root_pem=$1 inter_pem=$2 leaf_pem=$3 tmpdir
   tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' RETURN
   echo "$root_pem"  > "$tmpdir/root.pem"
   echo "$inter_pem" > "$tmpdir/inter.pem"
   echo "$leaf_pem" | openssl x509 2>/dev/null > "$tmpdir/leaf.pem"
+  local rc=0
   openssl verify -CAfile "$tmpdir/root.pem" -untrusted "$tmpdir/inter.pem" \
-    "$tmpdir/leaf.pem" > /dev/null 2>&1
+    "$tmpdir/leaf.pem" > /dev/null 2>&1 || rc=$?
+  rm -rf "$tmpdir"
+  return $rc
 }
 
 show_rotation_event() {
