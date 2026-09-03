@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PKI Dashboard</title>
+<style>
+  :root {
+    --bg:      #0d1117;
+    --surface: #161b22;
+    --border:  #30363d;
+    --text:    #e6edf3;
+    --dim:     #8b949e;
+    --green:   #3fb950;
+    --red:     #f85149;
+    --yellow:  #d29922;
+    --blue:    #58a6ff;
+    --purple:  #bc8cff;
+    --mono:    'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
+
+  /* Header */
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 16px; font-weight: 600; color: var(--text); }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .updated { margin-left: auto; color: var(--dim); font-size: 12px; font-family: var(--mono); }
+
+  /* Layout */
+  main { padding: 20px 24px; display: grid; gap: 16px; }
+
+  /* Cards */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .card-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .card-header h2 { font-size: 13px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  .card-body { padding: 16px; }
+
+  /* PKI Tree */
+  .tree { font-family: var(--mono); font-size: 13px; }
+  .tree-node { padding: 4px 0; display: flex; align-items: baseline; gap: 8px; }
+  .tree-node.root    { color: var(--green);  font-weight: 600; }
+  .tree-node.inter   { color: var(--blue);   font-weight: 600; padding-left: 20px; }
+  .tree-node.leaf    { color: var(--text);   padding-left: 44px; }
+  .tree-node.ca-cert { color: var(--purple); }
+  .node-icon  { flex-shrink: 0; }
+  .node-name  { font-weight: 600; }
+  .node-ns    { color: var(--dim); font-size: 11px; background: var(--bg); padding: 1px 6px; border-radius: 4px; }
+  .node-meta  { color: var(--dim); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  .badge      { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .badge.ok   { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .badge.err  { background: rgba(248,81,73,.15);  color: var(--red);   border: 1px solid rgba(248,81,73,.3); }
+  .badge.rot  { background: rgba(210,153,34,.15); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
+
+  /* Two-col grid */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* Deployments */
+  .deploy-group { margin-bottom: 12px; }
+  .deploy-group:last-child { margin-bottom: 0; }
+  .deploy-ns { font-size: 11px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+  .deploy-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .deploy-row:last-child { border-bottom: none; }
+  .deploy-name { font-family: var(--mono); font-size: 13px; }
+  .deploy-count { color: var(--dim); font-size: 12px; margin-left: auto; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.green  { background: var(--green); }
+  .dot.red    { background: var(--red); }
+  .dot.yellow { background: var(--yellow); }
+
+  /* Rotation events */
+  .rotation-empty { color: var(--dim); font-size: 13px; text-align: center; padding: 20px; }
+  .rotation-event { border-bottom: 1px solid var(--border); padding: 10px 0; }
+  .rotation-event:last-child { border-bottom: none; }
+  .rot-time   { font-size: 11px; color: var(--dim); font-family: var(--mono); }
+  .rot-cert   { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--yellow); margin: 2px 0; }
+  .rot-serial { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .rot-arrow  { color: var(--green); }
+
+  /* Certs table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--dim); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 0 8px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px; border-bottom: 1px solid rgba(48,54,61,.5); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .mono { font-family: var(--mono); }
+  .serial { font-family: var(--mono); font-size: 11px; color: var(--dim); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .expiry { font-family: var(--mono); font-size: 12px; }
+  .expiry.soon { color: var(--yellow); }
+
+  /* Logs */
+  .log-controls { display: flex; gap: 8px; margin-bottom: 10px; }
+  select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+  select:focus { outline: none; border-color: var(--blue); }
+  .log-output { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; height: 260px; overflow-y: auto; font-family: var(--mono); font-size: 12px; color: var(--dim); line-height: 1.6; scroll-behavior: smooth; }
+  .log-line { white-space: pre; }
+  .log-line .ts { color: var(--dim); }
+  .log-line .ok { color: var(--green); }
+  .log-line .err { color: var(--red); }
+
+  /* Empty state */
+  .empty { color: var(--dim); font-size: 13px; padding: 12px 0; }
+</style>
+</head>
+<body>
+<header>
+  <span style="font-size:18px">🔐</span>
+  <h1>PKI Dashboard</h1>
+  <div class="pulse" id="pulse"></div>
+  <span class="updated" id="updated">connecting…</span>
+</header>
+
+<main>
+  <!-- PKI Trust Chain -->
+  <div class="card">
+    <div class="card-header"><h2>PKI Trust Chain</h2></div>
+    <div class="card-body">
+      <div class="tree" id="tree"><span class="empty">Loading…</span></div>
+    </div>
+  </div>
+
+  <!-- Certificates -->
+  <div class="card">
+    <div class="card-header"><h2>Certificates</h2></div>
+    <div class="card-body" style="padding:0 16px 16px">
+      <table>
+        <thead>
+          <tr>
+            <th>Namespace</th>
+            <th>Name</th>
+            <th>Issuer</th>
+            <th>Subject / SANs</th>
+            <th>Serial</th>
+            <th>Expiry (UTC)</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="certs-body"><tr><td colspan="7" class="empty" style="padding:12px 8px">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Services + Rotations -->
+  <div class="two-col">
+    <div class="card">
+      <div class="card-header"><h2>Services</h2></div>
+      <div class="card-body" id="deploys"><span class="empty">Loading…</span></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h2>🔄 Rotation Events</h2></div>
+      <div class="card-body" id="rotations"><span class="rotation-empty">No rotations detected yet</span></div>
+    </div>
+  </div>
+
+  <!-- Live Logs -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Live Logs</h2>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <select id="log-ns">
+          <option value="pki-layer2">pki-layer2</option>
+          <option value="pki-layer3">pki-layer3</option>
+        </select>
+        <select id="log-deploy">
+          <option value="client">client</option>
+          <option value="server">server</option>
+        </select>
+      </div>
+    </div>
+    <div class="card-body" style="padding-top:10px">
+      <div class="log-output" id="log-output"><span class="empty">Connecting to log stream…</span></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// ── Status polling ────────────────────────────────────────────────────────────
+
+let knownSerials = {};
+
+async function fetchStatus() {
+  try {
+    const res = await fetch('/api/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderTree(data.certs);
+    renderCertsTable(data.certs);
+    renderDeploys(data.deployments);
+    renderRotations(data.rotations);
+    const t = new Date(data.updated_at);
+    $('updated').textContent = 'Updated ' + t.toLocaleTimeString();
+    $('pulse').style.background = 'var(--green)';
+  } catch {
+    $('pulse').style.background = 'var(--red)';
+    $('updated').textContent = 'Connection error';
+  }
+}
+
+// ── PKI Tree ──────────────────────────────────────────────────────────────────
+
+function renderTree(certs) {
+  if (!certs || certs.length === 0) { $('tree').innerHTML = '<span class="empty">No certificates found</span>'; return; }
+
+  const root  = certs.find(c => c.namespace === 'cert-manager' && c.name === 'root-ca');
+  const inter = certs.find(c => c.namespace === 'cert-manager' && c.name === 'intermediate-ca');
+  const leaves = certs.filter(c => c.namespace !== 'cert-manager');
+
+  let html = '';
+
+  if (root) {
+    html += treeNode('root', '◆', root.name, 'cert-manager', root, false);
+  }
+  if (inter) {
+    html += treeNode('inter', '└─◆', inter.name, 'cert-manager', inter, false);
+  }
+  const nsOrder = ['pki-layer1', 'pki-layer2', 'pki-layer3'];
+  const sorted = [...leaves].sort((a,b) => {
+    const ai = nsOrder.indexOf(a.namespace), bi = nsOrder.indexOf(b.namespace);
+    return ai !== bi ? ai - bi : a.name.localeCompare(b.name);
+  });
+  sorted.forEach((c, i) => {
+    const prefix = i === sorted.length - 1 ? '└─◆' : '├─◆';
+    html += treeNode('leaf', prefix, c.name, c.namespace, c, true);
+  });
+  $('tree').innerHTML = html;
+}
+
+function expiryLabel(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+
+function treeNode(cls, prefix, name, ns, cert, showNs) {
+  const badge = cert.ready
+    ? '<span class="badge ok">✓ Ready</span>'
+    : '<span class="badge err">✗ Not Ready</span>';
+  const nsTag = showNs ? `<span class="node-ns">${ns}</span>` : '';
+  const exp = cert.expiry ? `<span class="node-meta">${expiryLabel(cert.expiry)}</span>` : '';
+  return `<div class="tree-node ${cls}">
+    <span class="node-icon">${prefix}</span>
+    <span class="node-name">${name}</span>
+    ${nsTag} ${badge} ${exp}
+  </div>`;
+}
+
+// ── Certificates Table ────────────────────────────────────────────────────────
+
+function renderCertsTable(certs) {
+  if (!certs || certs.length === 0) {
+    $('certs-body').innerHTML = '<tr><td colspan="7" class="empty" style="padding:12px 8px">No certificates found</td></tr>';
+    return;
+  }
+  const nsOrder = ['cert-manager', 'pki-layer1', 'pki-layer2', 'pki-layer3'];
+  const sorted = [...certs].sort((a,b) => {
+    const ai = nsOrder.indexOf(a.namespace), bi = nsOrder.indexOf(b.namespace);
+    return ai !== bi ? ai - bi : a.name.localeCompare(b.name);
+  });
+  $('certs-body').innerHTML = sorted.map(c => {
+    const badge = c.ready
+      ? '<span class="badge ok">✓ Ready</span>'
+      : '<span class="badge err">✗ Not Ready</span>';
+    const serial = c.serial
+      ? `<span class="serial" title="${c.serial}">${c.serial.slice(0,16)}…</span>`
+      : '<span style="color:var(--dim)">—</span>';
+    const subject = c.subject || c.name;
+    const sans = c.sans && c.sans.length ? `<div style="color:var(--dim);font-size:11px;font-family:var(--mono)">${c.sans.slice(0,2).join(', ')}</div>` : '';
+    const expDate = c.expiry ? new Date(c.expiry) : null;
+    const soon = expDate && (expDate - Date.now()) < 2*3600*1000;
+    const exp = expDate ? `<span class="expiry ${soon?'soon':''}">${expDate.toISOString().slice(0,10)}</span>` : '—';
+    return `<tr>
+      <td class="mono" style="color:var(--dim);font-size:12px">${c.namespace}</td>
+      <td class="mono" style="font-weight:600">${c.name}</td>
+      <td class="mono" style="color:var(--dim);font-size:12px">${c.issuer || '—'}</td>
+      <td><div style="font-size:12px">${subject}</div>${sans}</td>
+      <td>${serial}</td>
+      <td>${exp}</td>
+      <td>${badge}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Deployments ───────────────────────────────────────────────────────────────
+
+function renderDeploys(deploys) {
+  if (!deploys || deploys.length === 0) {
+    $('deploys').innerHTML = '<span class="empty">No deployments found</span>';
+    return;
+  }
+  const byNs = {};
+  deploys.forEach(d => {
+    if (!byNs[d.namespace]) byNs[d.namespace] = [];
+    byNs[d.namespace].push(d);
+  });
+  $('deploys').innerHTML = Object.entries(byNs)
+    .sort(([a],[b]) => a.localeCompare(b))
+    .map(([ns, ds]) => `
+      <div class="deploy-group">
+        <div class="deploy-ns">${ns}</div>
+        ${ds.map(d => {
+          const ok = d.ready > 0 && d.ready === d.total;
+          const dotCls = ok ? 'green' : d.ready > 0 ? 'yellow' : 'red';
+          return `<div class="deploy-row">
+            <span class="dot ${dotCls}"></span>
+            <span class="deploy-name">${d.name}</span>
+            <span class="deploy-count">${d.ready || 0}/${d.total || 0}</span>
+          </div>`;
+        }).join('')}
+      </div>`).join('');
+}
+
+// ── Rotation events ───────────────────────────────────────────────────────────
+
+function renderRotations(rotations) {
+  if (!rotations || rotations.length === 0) {
+    $('rotations').innerHTML = '<span class="rotation-empty">No rotations detected yet</span>';
+    return;
+  }
+  $('rotations').innerHTML = [...rotations].reverse().map(r => {
+    const t = new Date(r.detected_at).toLocaleString();
+    const oldS = r.old_serial ? r.old_serial.slice(0,12) + '…' : '—';
+    const newS = r.new_serial ? r.new_serial.slice(0,12) + '…' : '—';
+    const oldExp = r.old_expiry ? new Date(r.old_expiry).toISOString().slice(0,10) : '?';
+    const newExp = r.new_expiry ? new Date(r.new_expiry).toISOString().slice(0,10) : '?';
+    return `<div class="rotation-event">
+      <div class="rot-time">${t}</div>
+      <div class="rot-cert">🔄 ${r.namespace} / ${r.cert_name}</div>
+      <div class="rot-serial">${oldS} <span class="rot-arrow">→</span> ${newS}</div>
+      <div class="rot-serial" style="color:var(--green)">exp: ${oldExp} → ${newExp}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Live Logs (SSE) ───────────────────────────────────────────────────────────
+
+let evtSrc = null;
+const logEl = $('log-output');
+const MAX_LINES = 200;
+
+function connectLogs() {
+  if (evtSrc) evtSrc.close();
+  const ns = $('log-ns').value;
+  const deploy = $('log-deploy').value;
+  logEl.innerHTML = `<span class="empty">Connecting to ${ns}/${deploy}…</span>`;
+  evtSrc = new EventSource(`/api/logs?ns=${ns}&deploy=${deploy}`);
+  evtSrc.onmessage = e => {
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    const text = e.data;
+    if (text.includes('status=ok') || text.includes('"status":"ok"')) {
+      line.innerHTML = `<span class="ok">${escHtml(text)}</span>`;
+    } else if (text.toLowerCase().includes('error') || text.toLowerCase().includes('fail')) {
+      line.innerHTML = `<span class="err">${escHtml(text)}</span>`;
+    } else {
+      line.textContent = text;
+    }
+    if (logEl.firstChild && logEl.firstChild.className === 'empty') logEl.innerHTML = '';
+    logEl.appendChild(line);
+    while (logEl.children.length > MAX_LINES) logEl.removeChild(logEl.firstChild);
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+  evtSrc.onerror = () => {
+    if (evtSrc.readyState === EventSource.CLOSED) return;
+    setTimeout(connectLogs, 3000);
+  };
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+$('log-ns').addEventListener('change', connectLogs);
+$('log-deploy').addEventListener('change', connectLogs);
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
+fetchStatus();
+setInterval(fetchStatus, 10000);
+connectLogs();
+</script>
+</body>
+</html>
