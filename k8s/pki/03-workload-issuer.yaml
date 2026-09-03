@@ -1,0 +1,10 @@
+---
+# Workload ClusterIssuer — backed by the intermediate CA.
+# This is the issuer referenced by all leaf Certificate resources across every layer.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: workload-issuer
+spec:
+  ca:
+    secretName: intermediate-ca-tls

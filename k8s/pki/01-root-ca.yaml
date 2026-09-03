@@ -1,0 +1,41 @@
+---
+# Step 1a: Bootstrap issuer — self-signed, used only to create the root CA certificate.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+# Step 1b: Root CA certificate — lives in the cert-manager namespace so ClusterIssuers can read it.
+# This is the trust anchor: its cert is distributed to all workloads as the CA bundle.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: root-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: pki-poc-root-ca
+  subject:
+    organizations:
+      - pki-poc
+  secretName: root-ca-tls
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  duration: 87600h  # 10 years
+  renewBefore: 720h # 30 days before expiry
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# Step 1c: ClusterIssuer backed by the root CA — used only to sign the intermediate CA cert.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: root-ca-issuer
+spec:
+  ca:
+    secretName: root-ca-tls

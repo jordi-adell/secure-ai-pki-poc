@@ -1,0 +1,25 @@
+---
+# Intermediate CA certificate — signed by the root CA ClusterIssuer.
+# Stored in the cert-manager namespace so the workload ClusterIssuer below can read it.
+# Workload certs are signed here; the root CA key is never used for leaf certs.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: intermediate-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: pki-poc-intermediate-ca
+  subject:
+    organizations:
+      - pki-poc
+  secretName: intermediate-ca-tls
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  duration: 43800h  # 5 years
+  renewBefore: 720h
+  issuerRef:
+    name: root-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
