@@ -3,10 +3,19 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"html/template"
 	"log"
+	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -449,16 +458,60 @@ func handleIndex(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprint(w, indexHTML)
 }
 
+func selfSignedCert() (tls.Certificate, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: "pki-dashboard"},
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	return tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+	)
+}
+
 func main() {
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
 		addr = defaultAddr
 	}
+
+	cert, err := selfSignedCert()
+	if err != nil {
+		log.Fatalf("generate TLS cert: %v", err)
+	}
+
+	ln, err := tls.Listen("tcp", addr, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	})
+	if err != nil {
+		log.Fatalf("listen: %v", err)
+	}
+
 	go poll()
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/report", handleReport)
 	http.HandleFunc("/api/status", handleStatus)
 	http.HandleFunc("/api/logs", handleLogs)
-	log.Printf("PKI Dashboard → http://localhost%s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	log.Printf("PKI Dashboard → https://localhost%s  (self-signed cert — accept browser warning)", addr)
+	log.Fatal(http.Serve(ln, nil))
 }

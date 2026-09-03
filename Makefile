@@ -129,7 +129,8 @@ validate-layer3:
 ## ── Dashboard ────────────────────────────────────────────────────────────────
 
 dashboard:
-	@printf "$(CYAN)▶ Starting PKI Dashboard on http://localhost:8080$(NC)\n"
+	@printf "$(CYAN)▶ Starting PKI Dashboard on https://localhost:8080$(NC)\n"
+	@printf "$(YELLOW)  Accept the self-signed cert warning in the browser$(NC)\n"
 	go run ./cmd/dashboard
 
 dashboards:
@@ -143,7 +144,7 @@ dashboards:
 	@printf "\n$(CYAN)════════════════════════════════════════════════════$(NC)\n"
 	@printf "$(CYAN)  PKI Dashboards$(NC)\n"
 	@printf "$(CYAN)════════════════════════════════════════════════════$(NC)\n"
-	@printf "  PKI Dashboard   → $(GREEN)http://localhost:8080$(NC)\n"
+	@printf "  PKI Dashboard   → $(GREEN)https://localhost:8080$(NC)\n"
 	@printf "  K8s Dashboard   → $(GREEN)https://localhost:8443$(NC)\n"
 	@printf "\n$(CYAN)K8s Dashboard login token:$(NC)\n"
 	@kubectl create token admin-user -n kubernetes-dashboard --duration=24h
