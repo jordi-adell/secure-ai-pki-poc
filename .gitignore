@@ -1,27 +1,36 @@
-# Binaries
-bin/
-*.exe
+# ── Go build outputs ──────────────────────────────────────────────────────────
+# Binaries produced by 'go build ./cmd/...' in the repo root
 /server
 /client
-
-# Go
+# Conventional output directory (e.g. 'go build -o bin/...')
+bin/
+# Windows executables
+*.exe
+# Test binaries compiled by 'go test -c'
+*.test
+# Coverage reports from 'go test -coverprofile'
+coverage.out
+coverage.html
+# Dependency vendor directory
 /vendor/
 
-# Secrets / generated certs (local testing only)
+# ── Docker / kind ─────────────────────────────────────────────────────────────
+# Exported kubeconfig (e.g. 'kind get kubeconfig > kubeconfig')
+kubeconfig
+
+# ── Generated certificates (local testing only) ───────────────────────────────
 *.pem
 *.crt
 *.key
 *.p12
 certs/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-
-# OS
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# kind
-kubeconfig
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
