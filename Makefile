@@ -12,12 +12,12 @@ CYAN   := \033[0;36m
 YELLOW := \033[1;33m
 NC     := \033[0m
 
-.PHONY: all demo install-deps check-prereqs cluster install-cert-manager deploy-pki \
+.PHONY: all demo demo-ci install-deps check-prereqs cluster install-cert-manager deploy-pki \
         deploy-layer1 validate-layer1 \
         build-images load-images \
         deploy-layer2 validate-layer2 \
-        deploy-layer3 validate-layer3 \
-        dashboard status test clean help
+        deploy-layer3 validate-layer3 validate-layer3-ci \
+        dashboard status k8s-dashboard k8s-dashboard-token test clean help
 
 ## ── Dependencies ─────────────────────────────────────────────────────────────
 
@@ -137,6 +137,53 @@ dashboard:
 status:
 	@bash scripts/pki-status.sh
 
+## ── CI targets ───────────────────────────────────────────────────────────────
+
+validate-layer3-ci:
+	@printf "$(CYAN)▶ Validating Layer 3 (CI — cert issuance only, no rotation wait)...$(NC)\n"
+	kubectl wait --for=condition=Ready certificate/server-tls \
+	  -n pki-layer3 --timeout=120s
+	kubectl wait --for=condition=Ready certificate/client-tls \
+	  -n pki-layer3 --timeout=120s
+	@printf "$(GREEN)✔ Layer 3 certs issued correctly (rotation not verified in CI)$(NC)\n"
+
+demo-ci: cluster install-cert-manager
+	@printf "\n$(CYAN)════════════════════════════════════════════════════$(NC)\n"
+	@printf "$(CYAN)  PKI PoC — CI Demo$(NC)\n"
+	@printf "$(CYAN)════════════════════════════════════════════════════$(NC)\n\n"
+	@$(MAKE) deploy-pki
+	@printf "\n$(CYAN)── Layer 1: Certificate Issuance ──$(NC)\n"
+	@$(MAKE) deploy-layer1
+	@$(MAKE) validate-layer1
+	@printf "\n$(CYAN)── Layer 2: mTLS Between Services ──$(NC)\n"
+	@$(MAKE) deploy-layer2
+	@$(MAKE) validate-layer2
+	@printf "\n$(CYAN)── Layer 3: Rotation (deploy + issuance check) ──$(NC)\n"
+	@$(MAKE) deploy-layer3
+	@$(MAKE) validate-layer3-ci
+	@printf "\n$(GREEN)════════════════════════════════════════════════════$(NC)\n"
+	@printf "$(GREEN)  CI demo complete.$(NC)\n"
+	@printf "$(GREEN)════════════════════════════════════════════════════$(NC)\n\n"
+
+## ── Kubernetes Dashboard ─────────────────────────────────────────────────────
+
+k8s-dashboard:
+	@printf "$(CYAN)▶ Installing Kubernetes Dashboard...$(NC)\n"
+	helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/ --force-update
+	helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard \
+	  --namespace kubernetes-dashboard --create-namespace --wait
+	kubectl apply -f k8s/dashboard/admin-user.yaml
+	@printf "$(GREEN)✔ Kubernetes Dashboard installed$(NC)\n"
+	@printf "\n$(CYAN)Login token (copy this):$(NC)\n"
+	@kubectl create token admin-user -n kubernetes-dashboard --duration=24h
+	@printf "\n$(CYAN)▶ Starting port-forward → https://localhost:8443$(NC)\n"
+	@printf "$(YELLOW)  (Ctrl+C to stop)$(NC)\n\n"
+	kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard-kong-proxy 8443:443
+
+k8s-dashboard-token:
+	@printf "$(CYAN)Login token:$(NC)\n"
+	kubectl create token admin-user -n kubernetes-dashboard --duration=24h
+
 ## ── Tests ────────────────────────────────────────────────────────────────────
 
 test:
@@ -191,6 +238,9 @@ help:
 	@printf "  validate-layer3       Wait for and confirm rotation\n"
 	@printf "  dashboard             Live web dashboard (http://localhost:8080)\n"
 	@printf "  status                Live PKI state — certs, issuers, deployments\n"
+	@printf "  k8s-dashboard         Install Kubernetes Dashboard + open port-forward\n"
+	@printf "  k8s-dashboard-token   Print a fresh login token for the dashboard\n"
 	@printf "  test                  Run Go unit tests\n"
-	@printf "  demo / all            Full end-to-end demo\n"
+	@printf "  demo / all            Full end-to-end demo (includes rotation wait)\n"
+	@printf "  demo-ci               CI demo — layers 1-3, no rotation wait\n"
 	@printf "  clean                 Delete kind cluster\n"
