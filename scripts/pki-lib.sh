@@ -16,13 +16,16 @@ banner()  { echo -e "\n${CYAN}════════════════�
 divider() { echo -e "${DIM}──────────────────────────────────────────────────────${NC}"; }
 
 cert_pem_from_secret() {
-  local secret=$1 ns=$2 key=${3:-tls\.crt}
-  kubectl get secret "$secret" -n "$ns" -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d
+  local secret=$1 ns=$2 key=${3:-tls.crt}
+  kubectl get secret "$secret" -n "$ns" \
+    --template="{{index .data \"${key}\"}}" 2>/dev/null | base64 -d
 }
 
 cert_field() {
-  local pem=$1 flag=$2
-  echo "$pem" | openssl x509 -noout "$flag" 2>/dev/null || true
+  local pem=$1
+  shift
+  # shellcheck disable=SC2068
+  echo "$pem" | openssl x509 -noout $@ 2>/dev/null || true
 }
 
 cert_cn() {
@@ -71,7 +74,9 @@ print_cert_block() {
   printf "${indent}${DIM}%-12s${NC} %s\n"  "Serial:"   "$serial"
   printf "${indent}${DIM}%-12s${NC} %s\n"  "Valid:"    "$start"
   printf "${indent}${DIM}%-12s${NC} %s\n"  "Expires:"  "$expiry"
-  [ -n "$sans" ] && printf "${indent}${DIM}%-12s${NC} %s\n" "SANs:" "$sans"
+  if [ -n "$sans" ]; then
+    printf "${indent}${DIM}%-12s${NC} %s\n" "SANs:" "$sans"
+  fi
 }
 
 show_chain_banner() {
