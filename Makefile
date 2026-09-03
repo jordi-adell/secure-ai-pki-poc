@@ -10,12 +10,17 @@ CYAN   := \033[0;36m
 YELLOW := \033[1;33m
 NC     := \033[0m
 
-.PHONY: all demo check-prereqs cluster install-cert-manager deploy-pki \
+.PHONY: all demo install-deps check-prereqs cluster install-cert-manager deploy-pki \
         deploy-layer1 validate-layer1 \
         build-images load-images \
         deploy-layer2 validate-layer2 \
         deploy-layer3 validate-layer3 \
         test clean help
+
+## ── Dependencies ─────────────────────────────────────────────────────────────
+
+install-deps:
+	@bash scripts/install-deps.sh
 
 ## ── Prerequisites check ──────────────────────────────────────────────────────
 
@@ -155,6 +160,7 @@ clean:
 
 help:
 	@printf "$(CYAN)PKI PoC — Available targets:$(NC)\n"
+	@printf "  install-deps          Install kind, helm, kubectl (macOS: brew; Linux: ~/.local/bin)\n"
 	@printf "  cluster               Create kind cluster\n"
 	@printf "  install-cert-manager  Install cert-manager via Helm\n"
 	@printf "  deploy-pki            Deploy Root CA + Intermediate CA\n"
