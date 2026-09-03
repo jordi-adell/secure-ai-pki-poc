@@ -22,6 +22,21 @@ jobs:
       - name: Run PKI demo (CI mode — no rotation wait)
         run: make demo-ci
 
+  test:
+    name: Go Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: make test
+
   dashboard:
     name: Dashboard Smoke Test
     runs-on: ubuntu-latest
