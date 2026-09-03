@@ -1,31 +1,58 @@
 # PKI System for mTLS in Kubernetes
 
-A proof-of-concept PKI system deployed on Kubernetes using [cert-manager](https://cert-manager.io/).
-Demonstrates three progressive layers: certificate issuance, mutual TLS between services, and
-automatic certificate rotation.
+A proof-of-concept PKI system on Kubernetes demonstrating how certificates are issued,
+enforced, and automatically rotated in a production-style two-tier CA hierarchy.
 
-## PKI Concepts
+Built with [cert-manager](https://cert-manager.io/) on a local [kind](https://kind.sigs.k8s.io/)
+cluster. The services are written in Go using only the standard library (`crypto/tls`).
 
-| Term | What it means here |
-|------|--------------------|
-| **Trust anchor** | Root CA certificate. The root CA key never signs workload certs. |
-| **Certificate chain** | Root CA → Intermediate CA → Leaf cert. Verifying a leaf cert traces up to the root. |
-| **SAN** | Subject Alternative Name. DNS names in the cert that TLS clients verify against. |
-| **mTLS** | Mutual TLS: both server and client present certificates. The server rejects clients without a valid cert signed by the trusted CA. |
-| **Rotation** | cert-manager renews a cert before it expires (`renewBefore`) and updates the Kubernetes Secret in place. Services hot-reload the new cert without restarting. |
+---
 
-## PKI Hierarchy
+## Architecture
+
+### CA Hierarchy
 
 ```
-Root CA  (trust anchor, 10-year lifetime)
-  └── Intermediate CA  (operational CA, 5-year lifetime)
-        ├── test-workload cert   — Layer 1
-        ├── server cert          — Layer 2 / 3
-        └── client cert          — Layer 2 / 3
+Root CA  (trust anchor — 10-year lifetime, never issues workload certs)
+  └── Intermediate CA  (operational CA — 5-year lifetime)
+        ├── test-workload cert   — Layer 1 (certificate issuance)
+        ├── server cert          — Layer 2 / 3 (mTLS + rotation)
+        └── client cert          — Layer 2 / 3 (mTLS + rotation)
 ```
 
-All CA secrets live in the `cert-manager` namespace, accessible to `ClusterIssuer` resources
-cluster-wide.
+The root CA key never signs workload certificates directly. The intermediate CA handles
+day-to-day signing, modelling how production PKI protects the root trust anchor.
+
+### Namespaces
+
+| Namespace | Purpose |
+|-----------|---------|
+| `cert-manager` | cert-manager system + CA secrets |
+| `pki-layer1` | Layer 1 — test certificate |
+| `pki-layer2` | Layer 2 — mTLS server + client (24h certs) |
+| `pki-layer3` | Layer 3 — mTLS server + client (1h certs, auto-rotation) |
+
+### Three Layers
+
+| Layer | Demonstrates |
+|-------|-------------|
+| **Layer 1** | CA hierarchy setup — cert-manager issues a leaf cert, chain is cryptographically verified |
+| **Layer 2** | Mutual TLS — Go server enforces client certs, rejects connections without one |
+| **Layer 3** | Automatic rotation — 1h cert lifetime, services hot-reload new certs without restarting |
+
+---
+
+## Key Concepts
+
+| Term | Meaning |
+|------|---------|
+| **Trust anchor** | The root CA certificate. Anything signed (directly or transitively) by the root is trusted. |
+| **Certificate chain** | Root CA → Intermediate CA → leaf cert. Verifying a leaf traces up to the root. |
+| **SAN** | Subject Alternative Name — DNS names the TLS client checks against the cert. |
+| **mTLS** | Mutual TLS — both sides present certificates. Server rejects clients without a valid cert. |
+| **Rotation** | cert-manager renews a cert before expiry and updates the Kubernetes Secret in place. Services pick up the new cert on the next TLS handshake with no restart. |
+
+---
 
 ## Prerequisites
 
@@ -35,171 +62,82 @@ cluster-wide.
 | kind | ≥ 0.23 | `go install sigs.k8s.io/kind@latest` |
 | kubectl | ≥ 1.28 | [kubernetes.io](https://kubernetes.io/docs/tasks/tools/) |
 | Helm | ≥ 3.14 | `brew install helm` |
+| Go | ≥ 1.22 | [go.dev](https://go.dev/dl/) |
 | openssl | any | pre-installed on most systems |
 
-## Quick Start — Full Demo
-
 ```bash
-make demo
-```
-
-This creates the kind cluster, installs cert-manager, deploys all three layers, and runs
-validation for each. Layer 3 validation waits up to 45 minutes for cert rotation.
-
-Run individual steps with `make help`.
-
----
-
-## Layer 1 — Certificate Issuance
-
-### What it does
-
-Deploys the two-tier PKI (Root CA → Intermediate CA → leaf certs) and issues a test
-certificate to a workload in the `pki-layer1` namespace.
-
-### Deploy
-
-```bash
-make deploy-pki
-make deploy-layer1
-```
-
-### Validate
-
-```bash
-make validate-layer1
-```
-
-The script:
-1. Waits for the `test-workload` Certificate to be `Ready`
-2. Prints the leaf cert's Subject, SANs, validity, and Issuer
-3. Verifies the full chain: `root → intermediate → leaf` using `openssl verify`
-4. Confirms the leaf issuer is the Intermediate CA (not the Root CA)
-
-### Inspect manually
-
-```bash
-# Show the issued certificate
-kubectl get secret test-workload-tls -n pki-layer1 \
-  -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
-
-# Show all cert-manager Certificate resources
-kubectl get certificate -A
+make install-deps   # installs kind, kubectl, helm (macOS via brew / Linux to ~/.local/bin)
 ```
 
 ---
 
-## Layer 2 — mTLS Between Services
-
-### What it does
-
-Deploys a Go HTTPS server and a Go client in the `pki-layer2` namespace. Both hold
-certificates issued by the PKI. The server requires and validates a client certificate
-(`tls.RequireAndVerifyClientCert`). Connections without a valid certificate are rejected.
-
-### Deploy
+## Quick Start
 
 ```bash
-make deploy-layer2
+make demo           # full end-to-end: cluster → Layer 1 → 2 → 3 (includes 30-min rotation wait)
+make demo-ci        # same but skips the rotation wait (for CI / quick validation)
 ```
 
-### Validate
+Run individual steps:
 
 ```bash
-make validate-layer2
+make cluster               # create kind cluster
+make install-cert-manager  # install cert-manager via Helm
+make deploy-pki            # deploy Root CA + Intermediate CA
+make deploy-layer1 && make validate-layer1
+make deploy-layer2 && make validate-layer2
+make deploy-layer3 && make validate-layer3
 ```
 
-The script:
-1. Confirms the server accepts a connection with a valid client cert (HTTP 200)
-2. Confirms the server rejects a connection without a client cert (TLS error)
+See `make help` for the full target list.
 
-### Inspect manually
+---
+
+## Dashboards
+
+### `make dashboards` — starts both dashboards with a single Ctrl+C to stop
 
 ```bash
-# Follow client logs (shows successful mTLS polls)
-kubectl logs -f deployment/client -n pki-layer2
+make dashboards
+```
 
-# See server logs
-kubectl logs -f deployment/server -n pki-layer2
+#### PKI Dashboard — `http://localhost:8080`
+
+Live view of the full PKI state: cert chain tree, all issued certificates with expiry and serial
+numbers, deployment health, and rotation events streamed as they happen.
+
+![PKI Dashboard](docs/screenshots/pki-dashboard.png)
+
+#### PKI Report — `http://localhost:8080/report`
+
+Printable HTML snapshot of the current PKI state — CA hierarchy, full certificate inventory,
+service health, and rotation history.
+
+![PKI Report](docs/screenshots/pki-report.png)
+
+#### Kubernetes Dashboard — `https://localhost:8443`
+
+Standard Kubernetes Dashboard showing all cluster resources including cert-manager
+`Certificate` and `ClusterIssuer` CRDs, deployments, secrets, and pods.
+
+```bash
+make k8s-dashboard-token   # print a fresh login token
 ```
 
 ---
 
-## Layer 3 — Automatic Certificate Rotation
-
-### What it does
-
-Same services as Layer 2, deployed in `pki-layer3`, but with short cert lifetimes:
-`duration: 1h`, `renewBefore: 30m`. cert-manager renews the cert ~30 minutes after issuance.
-The Go services watch the cert files and hot-reload the new cert on every new TLS handshake —
-no pod restart, no dropped connections.
-
-### Deploy
-
-```bash
-make deploy-layer3
-```
-
-### Validate
-
-```bash
-make validate-layer3
-```
-
-The script polls every 60 seconds (up to 45 minutes) and:
-1. Checks the server's cert serial number changes (rotation confirmed)
-2. Curl-tests the server every poll cycle to prove it stays available throughout
-3. Reports old vs new serial number and updated expiry
-
-### How hot-reload works
-
-cert-manager updates the Kubernetes Secret when it renews a cert. The Secret is
-volume-mounted in the pod. The Go `ReloadableCert` type runs a background goroutine
-that polls the cert file's `mtime` every 30 s. On change, it loads the new
-`tls.Certificate` under a write lock.
-
-The TLS server and client use `tls.Config.GetCertificate` and
-`tls.Config.GetClientCertificate` callbacks respectively — Go invokes these
-**per-handshake** (not once at startup), so new connections immediately use the
-rotated cert while existing connections complete normally.
-
----
-
-## Repository Structure
-
-```
-.
-├── Makefile                    # all automation targets
-├── cmd/
-│   ├── server/main.go          # mTLS server binary
-│   └── client/main.go          # mTLS client binary
-├── internal/
-│   └── tlsconfig/
-│       ├── reloadable.go       # ReloadableCert: hot-reload via callbacks
-│       └── reloadable_test.go  # unit + integration tests
-├── services/
-│   ├── server/Dockerfile       # multi-stage: golang:alpine → distroless
-│   └── client/Dockerfile
-├── k8s/
-│   ├── cert-manager/           # Helm values
-│   ├── pki/                    # CA hierarchy (applied in order 00→03)
-│   ├── layer1/                 # test Certificate CRD
-│   ├── layer2/                 # server + client (24h certs)
-│   └── layer3/                 # server + client (1h certs for rotation demo)
-└── scripts/
-    ├── validate-layer1.sh      # cert chain + SAN verification
-    ├── validate-layer2.sh      # mTLS accept/reject
-    └── validate-layer3.sh      # rotation detection + liveness
-```
-
-## Running Tests
+## Tests
 
 ```bash
 make test
-# or directly:
-go test ./... -v
 ```
 
-Tests cover:
-- `ReloadableCert` initial load, manual reload, and automatic watch-based reload
-- mTLS handshake: valid client cert accepted, missing client cert rejected
+Covers `ReloadableCert` (initial load, manual reload, watch-based hot-reload) and mTLS
+handshake correctness (valid client cert accepted, missing cert rejected).
+
+---
+
+## Implementation Details
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the full technical reference: service architecture,
+hot-reload internals, script design, CI pipeline, and repository layout.
