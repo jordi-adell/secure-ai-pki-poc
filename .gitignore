@@ -1,0 +1,27 @@
+# Binaries
+bin/
+*.exe
+/server
+/client
+
+# Go
+/vendor/
+
+# Secrets / generated certs (local testing only)
+*.pem
+*.crt
+*.key
+*.p12
+certs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# kind
+kubeconfig
