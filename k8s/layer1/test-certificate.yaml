@@ -1,0 +1,33 @@
+---
+# Layer 1: test Certificate — demonstrates that the PKI can issue a valid leaf cert.
+# After applying, cert-manager issues the cert and stores it in Secret test-workload-tls.
+# validate-layer1.sh extracts and verifies this cert against the full chain.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-workload
+  namespace: pki-layer1
+spec:
+  secretName: test-workload-tls
+  issuerRef:
+    name: workload-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+  commonName: test-workload.pki-layer1.svc.cluster.local
+  dnsNames:
+    - test-workload.pki-layer1.svc.cluster.local
+    - test-workload.pki-layer1
+    - test-workload
+  subject:
+    organizations:
+      - pki-poc
+  duration: 24h
+  renewBefore: 1h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+    - client auth
