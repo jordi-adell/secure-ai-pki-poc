@@ -1,5 +1,7 @@
 # PKI System for mTLS in Kubernetes
 
+> **Docs:** [README](README.md) · [Development Reference](DEVELOPMENT.md)
+
 A proof-of-concept PKI system on Kubernetes demonstrating how certificates are issued,
 enforced, and automatically rotated in a production-style two-tier CA hierarchy.
 

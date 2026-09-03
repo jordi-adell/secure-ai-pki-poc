@@ -1,5 +1,7 @@
 # Development Reference
 
+> **Docs:** [README](README.md) · [Development Reference](DEVELOPMENT.md)
+
 Technical internals, repository layout, and operational details for the PKI PoC.
 
 ---
