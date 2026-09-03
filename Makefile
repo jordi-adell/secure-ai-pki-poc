@@ -45,9 +45,13 @@ check-prereqs:
 ## ── Cluster ──────────────────────────────────────────────────────────────────
 
 cluster: check-prereqs
-	@printf "$(CYAN)▶ Creating kind cluster '$(CLUSTER_NAME)'...$(NC)\n"
-	kind create cluster --name $(CLUSTER_NAME)
-	@printf "$(GREEN)✔ Cluster ready$(NC)\n"
+	@if kind get clusters 2>/dev/null | grep -q "^$(CLUSTER_NAME)$$"; then \
+	  printf "$(YELLOW)– Cluster '$(CLUSTER_NAME)' already exists, skipping$(NC)\n"; \
+	else \
+	  printf "$(CYAN)▶ Creating kind cluster '$(CLUSTER_NAME)'...$(NC)\n"; \
+	  kind create cluster --name $(CLUSTER_NAME); \
+	  printf "$(GREEN)✔ Cluster ready$(NC)\n"; \
+	fi
 
 ## ── cert-manager ─────────────────────────────────────────────────────────────
 
