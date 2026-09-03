@@ -69,18 +69,26 @@ else
   pass "No-cert connection rejected (TLS error as expected)"
 fi
 
-info "Checking client pod logs for successful mTLS polls..."
-LOGS=$(kubectl logs -n "$NS" deployment/client --tail=20 2>/dev/null || true)
-if echo "$LOGS" | grep -q 'status=ok'; then
-  pass "Client polls succeeding — last log entries:"
-  echo "$LOGS" | tail -3 | while IFS= read -r line; do
-    printf "    ${DIM}%s${NC}\n" "$line"
-  done
-else
-  info "Client log output:"
-  echo "$LOGS"
-  fail "Client logs do not show successful responses yet"
-fi
+info "Waiting for client to establish successful mTLS polls (up to 60s)..."
+ELAPSED=0
+while [ "$ELAPSED" -lt 60 ]; do
+  LOGS=$(kubectl logs -n "$NS" deployment/client --tail=20 2>/dev/null || true)
+  if echo "$LOGS" | grep -q 'status=ok'; then
+    pass "Client polls succeeding — last log entries:"
+    echo "$LOGS" | tail -3 | while IFS= read -r line; do
+      printf "    ${DIM}%s${NC}\n" "$line"
+    done
+    break
+  fi
+  sleep 5
+  ELAPSED=$((ELAPSED + 5))
+  if [ "$ELAPSED" -ge 60 ]; then
+    info "Client log output:"
+    echo "$LOGS"
+    fail "Client logs do not show successful responses after 60s"
+  fi
+  waiting "Client not yet connected, retrying... (${ELAPSED}s)"
+done
 
 echo ""
 pass "Layer 2 complete — mTLS enforced, unauthorized connections rejected."
