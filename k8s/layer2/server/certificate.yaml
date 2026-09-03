@@ -1,0 +1,29 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: server-tls
+  namespace: pki-layer2
+spec:
+  secretName: server-tls
+  issuerRef:
+    name: workload-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+  commonName: server.pki-layer2.svc.cluster.local
+  dnsNames:
+    - server.pki-layer2.svc.cluster.local
+    - server.pki-layer2
+    - server
+  subject:
+    organizations:
+      - pki-poc
+  duration: 24h
+  renewBefore: 1h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+    - client auth
