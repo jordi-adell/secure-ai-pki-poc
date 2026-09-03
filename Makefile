@@ -17,7 +17,7 @@ NC     := \033[0m
         build-images load-images \
         deploy-layer2 validate-layer2 \
         deploy-layer3 validate-layer3 validate-layer3-ci \
-        dashboard status k8s-dashboard k8s-dashboard-token test clean help
+        dashboard dashboards status k8s-dashboard k8s-dashboard-token test clean help
 
 ## ── Dependencies ─────────────────────────────────────────────────────────────
 
@@ -132,6 +132,27 @@ dashboard:
 	@printf "$(CYAN)▶ Starting PKI Dashboard on http://localhost:8080$(NC)\n"
 	go run ./cmd/dashboard
 
+dashboards:
+	@kubectl get deployment kubernetes-dashboard -n kubernetes-dashboard >/dev/null 2>&1 || { \
+	  printf "$(CYAN)▶ Installing Kubernetes Dashboard...$(NC)\n"; \
+	  kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml; \
+	  kubectl wait --for=condition=Available deployment/kubernetes-dashboard \
+	    -n kubernetes-dashboard --timeout=120s; \
+	  kubectl apply -f k8s/dashboard/admin-user.yaml; \
+	}
+	@printf "\n$(CYAN)════════════════════════════════════════════════════$(NC)\n"
+	@printf "$(CYAN)  PKI Dashboards$(NC)\n"
+	@printf "$(CYAN)════════════════════════════════════════════════════$(NC)\n"
+	@printf "  PKI Dashboard   → $(GREEN)http://localhost:8080$(NC)\n"
+	@printf "  K8s Dashboard   → $(GREEN)https://localhost:8443$(NC)\n"
+	@printf "\n$(CYAN)K8s Dashboard login token:$(NC)\n"
+	@kubectl create token admin-user -n kubernetes-dashboard --duration=24h
+	@printf "\n$(YELLOW)Ctrl+C to stop both$(NC)\n\n"
+	@trap 'kill %1 %2 2>/dev/null; exit 0' INT TERM; \
+	  go run ./cmd/dashboard & \
+	  kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443 & \
+	  wait
+
 ## ── PKI status ───────────────────────────────────────────────────────────────
 
 status:
@@ -237,7 +258,8 @@ help:
 	@printf "  validate-layer2       Validate mTLS acceptance and rejection\n"
 	@printf "  deploy-layer3         Deploy rotation demo (1h cert lifetime)\n"
 	@printf "  validate-layer3       Wait for and confirm rotation\n"
-	@printf "  dashboard             Live web dashboard (http://localhost:8080)\n"
+	@printf "  dashboards            Start PKI + K8s dashboards together (Ctrl+C stops both)\n"
+	@printf "  dashboard             PKI dashboard only (http://localhost:8080)\n"
 	@printf "  status                Live PKI state — certs, issuers, deployments\n"
 	@printf "  k8s-dashboard         Install Kubernetes Dashboard + open port-forward\n"
 	@printf "  k8s-dashboard-token   Print a fresh login token for the dashboard\n"
