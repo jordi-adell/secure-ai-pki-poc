@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  namespace: pki-layer3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      containers:
+        - name: client
+          image: pki-poc/client:latest
+          imagePullPolicy: Never
+          env:
+            - name: TLS_CERT_FILE
+              value: /certs/tls.crt
+            - name: TLS_KEY_FILE
+              value: /certs/tls.key
+            - name: TLS_CA_FILE
+              value: /certs/ca.crt
+            - name: SERVER_URL
+              value: https://server.pki-layer3.svc.cluster.local:8443
+            - name: POLL_INTERVAL
+              value: 5s
+          volumeMounts:
+            - name: tls
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: tls
+          secret:
+            secretName: client-tls
